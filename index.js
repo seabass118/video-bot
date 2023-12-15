@@ -1,7 +1,7 @@
 const { exec } = require("child_process");
 const { totalTime } = require("./utils");
 const fs = require("fs");
-const ytdl = require("ytdl-core");
+const youtubedl = require('youtube-dl-exec')
 const prompt = require('prompt-sync')();
 
 const config = {
@@ -28,30 +28,25 @@ const start = () => {
     });
 }
 
-const downloadVideo = (url) => {
+const downloadVideo = (url, clipStart, clipEnd) => {
     return new Promise((resolve) => {
         console.log("Downloading youtube video...");
         try {
-            ytdl(url, { filter: "audioandvideo" }).pipe(fs.createWriteStream("temp/download.mp4")).on("close", async () => { 
-                resolve();
-            })
+           youtubedl(url , {
+                output: "temp/youtube_clip.mp4",
+                format: "mp4",
+                downloader: "ffmpeg",
+                downloaderArgs: `ffmpeg_i:-ss ${clipStart} -to ${clipEnd}`,
+                noCheckCertificates: true,
+                noWarnings: true,
+                preferFreeFormats: true,
+                addHeader: ['referer:youtube.com', 'user-agent:googlebot']
+            }).then(resolve())
         } catch (error) {
             console.log("Error downloading video: " + error);
         }
     })
 };
-
-const trimDownload = (clipStart, clipEnd) => {
-    return new Promise((resolve) => {
-        console.log("Trimming download...");
-        exec(`ffmpeg -ss ${clipStart} -to ${clipEnd} -i temp/download.mp4 -c copy temp/download_clip.mp4`, (error, stdout, stderr) => {
-            if (error) {
-             console.warn(error);
-            }
-            resolve(stdout? stdout : stderr);
-        });
-    });
-}
 
 const trimGameplay = (clipStart, clipEnd) => {
     return new Promise((resolve) => {
@@ -69,7 +64,7 @@ const generateSubtitles = () => {
     return new Promise((resolve) => {
         if(config.subtitles) {
             console.log("Generating subtitles using Whisper...")
-            exec(`stable-ts temp/download_clip.mp4 -o subtitles.srt --output_dir temp --max_words 1 --suppress_tokens=0,11,13,30 --tag "<font color="#F8E36A">" "</font>"`, (error, stdout, stderr) => {
+            exec(`stable-ts temp/youtube_clip.mp4 -o subtitles.srt --output_dir temp --max_words 1 --suppress_tokens=0,11,13,30 --tag "<font color="#F8E36A">" "</font>"`, (error, stdout, stderr) => {
                 console.log(stdout);
                 if (error) {
                     console.warn(error);
@@ -102,7 +97,7 @@ const burnSubtitles = () => {
 const scaleClip = () => {
     return new Promise((resolve) => {
         console.log("Scaling clip...");
-        exec("ffmpeg -i temp/download_clip.mp4 -filter:v scale='trunc(oh*a/2)*2:960' -c:a copy temp/download_clip_scaled.mp4", (error, stdout, stderr) => {
+        exec("ffmpeg -i temp/youtube_clip.mp4 -filter:v scale='trunc(oh*a/2)*2:960' -c:a copy temp/download_clip_scaled.mp4", (error, stdout, stderr) => {
             if (error) {
              console.warn(error);
             }
@@ -161,18 +156,16 @@ const addOverlay = (outputName) => {
 }
 
 start().then((data) => {
-    downloadVideo(data.url).then(() => {
-        trimDownload(data.clipStart, data.clipEnd).then(() => {
-            trimGameplay(data.clipStart, data.clipEnd).then(() => {
-                scaleClip().then(() => {
-                    scaleGameplay().then(() => {
-                        generateSubtitles().then(() => {
-                            burnSubtitles().then(() => {
-                                stackVideos().then(() => {
-                                    cropVideo(data.outputName).then(() => {
-                                        addOverlay(data.outputName).then(() => {
-                                            fs.rmSync("temp", { recursive: true, force: true });
-                                        })
+    downloadVideo(data.url, data.clipStart, data.clipEnd).then(() => {
+        trimGameplay(data.clipStart, data.clipEnd).then(() => {
+            scaleClip().then(() => {
+                scaleGameplay().then(() => {
+                    generateSubtitles().then(() => {
+                        burnSubtitles().then(() => {
+                            stackVideos().then(() => {
+                                cropVideo(data.outputName).then(() => {
+                                    addOverlay(data.outputName).then(() => {
+                                        fs.rmSync("temp", { recursive: true, force: true });
                                     })
                                 })
                             })
@@ -183,3 +176,6 @@ start().then((data) => {
         })
     })
 });
+
+// Perfomance upgrades
+
